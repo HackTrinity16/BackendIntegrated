@@ -1,0 +1,57 @@
+<!-- templates/index.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Mock Trial</title>
+    <script>
+        async function createTrial() {
+            const username1 = document.getElementById('username1').value;
+            const username2 = document.getElementById('username2').value;
+            const description = document.getElementById('description').value;
+
+            const response = await fetch('/create_trial', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    'username1': username1,
+                    'username2': username2,
+                    'description': description
+                })
+            });
+
+            const data = await response.json();
+            if (data.trial_id) {
+                // Display two buttons to open trial pages for each user
+                const trialId = data.trial_id;
+                const buttonsDiv = document.getElementById('trialLinks');
+                buttonsDiv.innerHTML = `
+                    <p>Trial created successfully! Open the trial as one of the parties:</p>
+                    <button onclick="openTrialPage('${trialId}', '${username1}')">Open as ${username1}</button>
+                    <button onclick="openTrialPage('${trialId}', '${username2}')">Open as ${username2}</button>
+                `;
+            } else {
+                alert('Error creating trial: ' + data.error);
+            }
+        }
+
+        function openTrialPage(trialId, username) {
+            const url = `/trial?trial_id=${trialId}&username=${username}`;
+            window.open(url, '_blank');
+        }
+    </script>
+</head>
+<body>
+    <h1>Create a New Mock Trial</h1>
+    <form onsubmit="event.preventDefault(); createTrial();">
+        <label for="username1">Username of Party 1 (Plaintiff):</label><br>
+        <input type="text" id="username1" name="username1" required><br><br>
+        <label for="username2">Username of Party 2 (Defendant):</label><br>
+        <input type="text" id="username2" name="username2" required><br><br>
+        <label for="description">Trial Description:</label><br>
+        <textarea id="description" name="description" required></textarea><br><br>
+        <input type="submit" value="Create Trial">
+    </form>
+    <div id="trialLinks"></div>
+</body>
+</html>

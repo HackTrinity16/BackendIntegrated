@@ -1,0 +1,214 @@
+<!-- templates/trial.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mock Trial Simulator</title>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <style>
+        /* Basic styles for the interface */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #transcript {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 20px;
+        }
+        #actions {
+            margin-bottom: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        #caseLibrary {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 150px;
+            overflow-y: scroll;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Mock Trial Simulator</h1>
+    <div id="status"></div>
+    <div id="transcript"></div>
+    <h2>Case Library</h2>
+    <div id="caseLibrary"></div>
+
+    <div id="actions">
+        <button id="submitEvidenceBtn">Submit Evidence</button>
+        <button id="submitWitnessBtn">Submit Witness</button>
+        <button id="readyBtn">Ready for Next Phase</button>
+        <button id="submitActionBtn" class="hidden">Submit Action</button>
+        <button id="submitQuestionBtn" class="hidden">Submit Question</button>
+        <button id="objectBtn" class="hidden">Object</button>
+    </div>
+
+    <script>
+        var socket = io();
+        var urlParams = new URLSearchParams(window.location.search);
+        var username = urlParams.get('username');
+        var trial_id = urlParams.get('trial_id');
+
+        if (!username || !trial_id) {
+            alert('Missing username or trial ID.');
+            window.location.href = '/';
+        }
+
+        socket.on('connect', function() {
+            socket.emit('join_trial', {'username': username, 'trial_id': trial_id});
+            fetchCaseLibrary();
+        });
+
+        socket.on('trial_state', function(data) {
+            document.getElementById('status').innerHTML = 'Current Phase: ' + data.current_phase;
+            updateUI(data);
+        });
+
+        socket.on('phase_advanced', function(data) {
+            document.getElementById('status').innerHTML = 'Current Phase: ' + data.next_phase;
+            updateUI({'current_phase': data.next_phase});
+        });
+
+        socket.on('turn_changed', function(data) {
+            document.getElementById('status').innerHTML += '<br>Current Turn: ' + data.current_turn;
+            updateUI({'current_turn': data.current_turn});
+        });
+
+        socket.on('transcript_updated', function(data) {
+            var transcript = document.getElementById('transcript');
+            var entry = `[${data.timestamp}] ${data.speaker_role} (${data.speaker_username || ''}): ${data.content}`;
+            transcript.innerHTML += '<p>' + entry + '</p>';
+            transcript.scrollTop = transcript.scrollHeight;
+        });
+
+        socket.on('verdict_announced', function(data) {
+            alert(`Verdict: ${data.verdict}\nReasoning: ${data.reasoning}`);
+        });
+
+        socket.on('evidence_updated', function(data) {
+            fetchCaseLibrary();
+        });
+
+        socket.on('witness_updated', function(data) {
+            fetchCaseLibrary();
+        });
+
+        socket.on('user_ready', function(data) {
+            if (data.username !== username) {
+                alert(`${data.username} is ready for the next phase.`);
+            }
+        });
+
+        function updateUI(state) {
+            var current_phase = state.current_phase;
+            var current_turn = state.current_turn;
+
+            // Hide or show buttons based on phase and turn
+            if (current_phase === 'pre_trial') {
+                document.getElementById('submitEvidenceBtn').style.display = 'inline';
+                document.getElementById('submitWitnessBtn').style.display = 'inline';
+                document.getElementById('readyBtn').style.display = 'inline';
+                document.getElementById('submitActionBtn').style.display = 'none';
+            } else {
+                document.getElementById('submitEvidenceBtn').style.display = 'none';
+                document.getElementById('submitWitnessBtn').style.display = 'none';
+                document.getElementById('readyBtn').style.display = 'none';
+
+                if (current_turn === username) {
+                    document.getElementById('submitActionBtn').style.display = 'inline';
+                } else {
+                    document.getElementById('submitActionBtn').style.display = 'none';
+                }
+            }
+        }
+
+        async function fetchCaseLibrary() {
+            const response = await fetch(`/case_library/${trial_id}`);
+            const data = await response.json();
+            const caseLibrary = document.getElementById('caseLibrary');
+            caseLibrary.innerHTML = '<h3>Evidence:</h3>';
+            data.evidence.forEach(item => {
+                caseLibrary.innerHTML += `<p>${item.description} (Submitted by: ${item.submitted_by})</p>`;
+            });
+            caseLibrary.innerHTML += '<h3>Witnesses:</h3>';
+            data.witnesses.forEach(item => {
+                caseLibrary.innerHTML += `<p>${item.name} (Called by: ${item.called_by})</p>`;
+            });
+        }
+
+        document.getElementById('submitEvidenceBtn').onclick = function() {
+            var description = prompt("Enter evidence description:");
+            socket.emit('submit_evidence', {'username': username, 'trial_id': trial_id, 'description': description});
+        };
+
+        document.getElementById('submitWitnessBtn').onclick = function() {
+            var witness_name = prompt("Enter witness name:");
+            socket.emit('submit_witness', {'username': username, 'trial_id': trial_id, 'witness_name': witness_name});
+        };
+
+        document.getElementById('readyBtn').onclick = async function() {
+            socket.emit('ready_for_next_phase', {'username': username, 'trial_id': trial_id});
+            // Check if opponent is ready
+            const response = await fetch(`/opponent_ready/${trial_id}/${username}`);
+            const data = await response.json();
+            if (data.opponent_ready) {
+                alert('Your opponent is also ready. Proceeding to the next phase.');
+            } else {
+                alert('Waiting for your opponent to be ready.');
+            }
+        };
+
+        document.getElementById('submitActionBtn').onclick = function() {
+            var current_phase = document.getElementById('status').innerHTML.split('Current Phase: ')[1].split('<br>')[0];
+            if (current_phase === 'opening_statements') {
+                var content = prompt("Enter your opening statement:");
+                socket.emit('submit_action', {
+                    'username': username,
+                    'trial_id': trial_id,
+                    'action_type': 'opening_statement',
+                    'content': content
+                });
+            } else if (current_phase.includes('presentation_of_evidence') || current_phase === 'rebuttal') {
+                var action_choice = prompt("Choose an action:\n1. Call a witness\n2. Introduce evidence\n3. Rest your case");
+                if (action_choice === '1') {
+                    var witness_name = prompt("Enter the name of the witness to call:");
+                    socket.emit('submit_action', {
+                        'username': username,
+                        'trial_id': trial_id,
+                        'action_type': 'call_witness',
+                        'witness_name': witness_name
+                    });
+                } else if (action_choice === '2') {
+                    var evidence_description = prompt("Enter the description of the evidence to introduce:");
+                    socket.emit('submit_action', {
+                        'username': username,
+                        'trial_id': trial_id,
+                        'action_type': 'introduce_evidence',
+                        'evidence_description': evidence_description
+                    });
+                } else if (action_choice === '3') {
+                    socket.emit('submit_action', {
+                        'username': username,
+                        'trial_id': trial_id,
+                        'action_type': 'rest_case'
+                    });
+                }
+            } else if (current_phase === 'closing_arguments') {
+                var content = prompt("Enter your closing argument:");
+                socket.emit('submit_action', {
+                    'username': username,
+                    'trial_id': trial_id,
+                    'action_type': 'closing_argument',
+                    'content': content
+                });
+            }
+        };
+    </script>
+</body>
+</html>
